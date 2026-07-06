@@ -1,0 +1,43 @@
+# Old and new printer IPs
+$OldIP = "old IP here"  #Change to current IP
+$NewIP = "New IP Here"  #Change to New IP
+
+# Find printer ports using the old IP
+$PrinterPorts = Get-PrinterPort | Where-Object {
+    $_.PrinterHostAddress -eq $OldIP -or $_.Name -like "*$OldIP*"
+}
+
+foreach ($Port in $PrinterPorts) {
+
+    Write-Host "Found printer port using old IP: $($Port.Name)"
+
+    # Find printers using this port
+    $Printers = Get-Printer | Where-Object {
+        $_.PortName -eq $Port.Name
+    }
+
+    # Create new port name
+    $NewPortName = "IP_$NewIP"
+
+    # Create the new port if it does not already exist
+    if (-not (Get-PrinterPort -Name $NewPortName -ErrorAction SilentlyContinue)) {
+        Add-PrinterPort -Name $NewPortName -PrinterHostAddress $NewIP
+        Write-Host "Created new printer port: $NewPortName"
+    }
+
+    # Move printers to the new port
+    foreach ($Printer in $Printers) {
+        Set-Printer -Name $Printer.Name -PortName $NewPortName
+        Write-Host "Updated printer '$($Printer.Name)' to $NewIP"
+    }
+
+    # Optional: remove the old port if no printer is using it anymore
+    $StillUsed = Get-Printer | Where-Object {
+        $_.PortName -eq $Port.Name
+    }
+
+    if (-not $StillUsed) {
+        Remove-PrinterPort -Name $Port.Name
+        Write-Host "Removed old printer port: $($Port.Name)"
+    }
+}
