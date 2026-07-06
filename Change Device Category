@@ -1,0 +1,59 @@
+~~This is a MULTI PART Script!!!!!~~
+
+
+PART 1:
+
+Get the CategoryID:
+
+$result = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceCategories"
+ $result.value
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+PART 2:
+
+Connect-MgGraph -Scopes DeviceManagementManagedDevices.ReadWrite.All
+
+$csvPath = "vsc filepath"
+
+# Category ID that worked
+$categoryId = "6d6146e4-5d36-400d-82b0-485318a7970c"
+
+$devicesFromCsv = Import-Csv $csvPath
+
+# Get all Intune devices
+$devices = Invoke-MgGraphRequest `
+    -Method GET `
+    -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices"
+
+foreach ($item in $devicesFromCsv) {
+
+    $deviceName = $item.DeviceName.Trim()
+
+    $device = $devices.value | Where-Object {
+        $_.deviceName -eq $deviceName
+    }
+
+    if (-not $device) {
+        Write-Host "NOT FOUND: $deviceName"
+        continue
+    }
+
+    foreach ($d in $device) {
+
+        $uri = "https://graph.microsoft.com/beta/deviceManagement/managedDevices/$($d.id)/deviceCategory/`$ref"
+
+        $body = @{
+            "@odata.id" = "https://graph.microsoft.com/beta/deviceManagement/deviceCategories/$categoryId"
+        } | ConvertTo-Json
+
+        Invoke-MgGraphRequest `
+            -Method PUT `
+            -Uri $uri `
+            -Body $body `
+            -ContentType "application/json"
+
+        Write-Host "UPDATED: $deviceName"
+    }
+}
