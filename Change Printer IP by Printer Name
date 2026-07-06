@@ -1,0 +1,34 @@
+# Printer name and new IP
+$PrinterName = "Printers Name Here #printer name here
+$NewIP = "New IP here" #new IP here
+
+Write-Host "Checking printer: $PrinterName"
+
+# Find printer
+$Printer = Get-Printer | Where-Object {
+    $_.Name -like "*$PrinterName*"
+}
+
+if ($Printer) {
+
+    Write-Host "Found printer: $($Printer.Name)"
+
+    $NewPortName = "IP_$NewIP"
+
+    # Create new printer port if it does not exist
+    if (-not (Get-PrinterPort -Name $NewPortName -ErrorAction SilentlyContinue)) {
+
+        Add-PrinterPort -Name $NewPortName -PrinterHostAddress $NewIP
+
+        Write-Host "Created new port: $NewPortName"
+    }
+
+    # Change printer to new port
+    Set-Printer -Name $Printer.Name -PortName $NewPortName
+
+    Write-Host "Updated '$($Printer.Name)' to use IP $NewIP"
+}
+else {
+
+    Write-Host "Printer not found: $PrinterName"
+}
