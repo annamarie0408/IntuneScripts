@@ -1,0 +1,161 @@
+# Intune Printer Deployment – Detection & Remediation Scripts
+
+A pair of PowerShell scripts for deploying and maintaining a TCP/IP network printer on Windows devices using **Microsoft Intune Remediations** (formerly *Proactive Remediations*).
+
+The detection script checks whether the printer is installed with the correct port and driver. If it isn't, Intune runs the remediation script to install (or reinstall) it. Because Remediations run on a schedule, the printer is automatically restored if a user deletes it or its configuration drifts.
+
+---
+
+## 📁 Files
+
+| File | Purpose |
+|------|---------|
+| `Printer_Detection.ps1` | Checks that the printer exists and uses the expected port and driver. Exits `0` (compliant) or `1` (non-compliant). |
+| `Printer_Remediation.ps1` | Creates the TCP/IP port, installs the driver if needed, removes any existing misconfigured printer, and adds the printer fresh. |
+
+---
+
+## ⚙️ How It Works
+
+```
+          ┌──────────────────────┐
+          │  Detection script    │
+          └──────────┬───────────┘
+                     │
+      Printer exists with correct
+         port AND driver?
+          │                 │
+         Yes                No
+          │                 │
+       exit 0            exit 1
+     (Compliant)     (Non-compliant)
+          │                 │
+       Done          ┌──────▼──────────────┐
+                     │ Remediation script  │
+                     └──────┬──────────────┘
+                            │
+             1. Create port if missing
+             2. Install driver if missing
+             3. Remove existing printer (if any)
+             4. Add printer with correct config
+```
+
+### Detection logic
+The printer is considered **compliant** only if all three of these are true:
+- A printer with the configured name exists
+- Its port name matches `IP_<address>`
+- Its driver matches the configured driver name
+
+### Remediation logic
+1. **Port** – Creates a Standard TCP/IP port named `IP_<address>` if it doesn't already exist.
+2. **Driver** – Installs the driver from the Windows driver store if it isn't already installed.
+3. **Printer** – Removes any existing printer with the same name (to clear out a bad configuration), then re-adds it using the correct port and driver.
+
+All steps are wrapped in a `try/catch` block, so any failure is reported back to Intune with the error message and exit code `1`.
+
+---
+
+## 🔧 Configuration
+
+Both scripts share the same four variables at the top. **Edit them in both files and keep them identical**, otherwise detection will never report compliant.
+
+```powershell
+$printerName = "Office Printer"                # Display name of the printer
+$ipAddress   = "192.168.1.100"                 # Printer's IP address
+$portName    = "IP_$ipAddress"                 # Port name (built from the IP)
+$driverName  = "Microsoft PCL6 Class Driver"   # Driver to use
+```
+
+### About the driver
+The default `Microsoft PCL6 Class Driver` is an **inbox driver** included with Windows 10 and Windows 11, so no driver package needs to be deployed. It works with most PCL6-compatible printers for basic printing.
+
+If you want to use a manufacturer-specific driver instead:
+- The driver must already be in the device's **driver store** before `Add-PrinterDriver` can install it (e.g. stage it first with `pnputil /add-driver <file>.inf` or deploy it as a Win32 app).
+- `$driverName` must exactly match the driver's name as shown by `Get-PrinterDriver`.
+
+---
+
+## 🚀 Deploying in Intune
+
+1. In the **Microsoft Intune admin center**, go to **Devices** → **Scripts and remediations** → **Remediations**.
+2. Select **+ Create**.
+3. Give it a name (e.g. *Deploy Office Printer*) and click **Next**.
+4. Configure the settings:
+
+   | Setting | Value |
+   |---------|-------|
+   | Detection script file | `Printer_Detection.ps1` |
+   | Remediation script file | `Printer_Remediation.ps1` |
+   | Run this script using the logged-on credentials | **No** (runs as SYSTEM, installs the printer for all users) |
+   | Enforce script signature check | **No** (unless you sign the scripts) |
+   | Run script in 64-bit PowerShell | **Yes** |
+
+5. Assign to the target **device group** and set a schedule (e.g. daily or hourly).
+6. Review and create.
+
+> **Note:** Intune Remediations require Windows Enterprise, Education, or Windows 365 licensing with the appropriate Intune license. Check Microsoft's current licensing documentation for your tenant.
+
+---
+
+## 🧪 Testing Locally
+
+Run from an **elevated** PowerShell prompt:
+
+```powershell
+# Check current state
+.\Printer_Detection.ps1
+$LASTEXITCODE   # 0 = compliant, 1 = non-compliant
+
+# Install / repair the printer
+.\Printer_Remediation.ps1
+$LASTEXITCODE   # 0 = success, 1 = failure
+
+# Confirm it now passes detection
+.\Printer_Detection.ps1
+```
+
+If you get an execution policy error, you can bypass it for the current session:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+```
+
+---
+
+## 📋 Exit Codes
+
+| Script | Exit Code | Meaning |
+|--------|-----------|---------|
+| Detection | `0` | Printer is correctly configured – no action needed |
+| Detection | `1` | Printer missing or misconfigured – remediation will run |
+| Remediation | `0` | Printer installed successfully |
+| Remediation | `1` | Installation failed (error message written to output) |
+
+Script output (`Write-Host`) is visible in Intune under the remediation's **Device status** report, which helps with troubleshooting.
+
+---
+
+## 🛠️ Troubleshooting
+
+| Problem | Likely Cause |
+|---------|--------------|
+| Remediation fails on `Add-PrinterDriver` | The driver isn't in the driver store, or the name doesn't exactly match. |
+| Detection never reports compliant | Variables differ between the two scripts, or the driver name has a typo. |
+| Printer installs but won't print | Wrong IP, printer offline, firewall blocking port 9100, or the class driver isn't compatible with the model. |
+| Printer only appears for one user | Script was set to run with logged-on credentials instead of SYSTEM. |
+
+---
+
+## ✅ Requirements
+
+- Windows 10 / Windows 11
+- PowerShell 5.1 or later (with the built-in `PrintManagement` module)
+- Administrator / SYSTEM privileges
+- Network connectivity to the printer
+- Microsoft Intune with Remediations licensing (for Intune deployment)
+
+---
+
+## 📄 License
+
+Feel free to use and adapt these scripts for your own environment. Provided as-is with no warranty – test before deploying to production.
